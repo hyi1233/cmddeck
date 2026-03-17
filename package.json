@@ -1,0 +1,49 @@
+{
+  "name": "cmddeck",
+  "version": "1.0.0",
+  "description": "CmdDeck - A local-first desktop UI for Claude Code and Codex CLI",
+  "author": "openclaw",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "npm run build:portable",
+    "build:portable": "vite build && electron-builder --win portable",
+    "build:portable:zip": "npm run build:portable && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
+    "build:installer": "vite build && electron-builder --win nsis",
+    "preview": "vite build && electron ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
+    "react-syntax-highlighter": "^15.6.1",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.0.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^3.4.17",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "concurrently": "^9.1.2",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.cmddeck.app",
+    "productName": "CmdDeck",
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    }
+  }
+}

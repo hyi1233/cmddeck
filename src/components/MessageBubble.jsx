@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light';
@@ -265,7 +265,7 @@ function AttachmentDisplay({ files }) {
   );
 }
 
-export default function MessageBubble({ message, isStreaming }) {
+function MessageBubble({ message, isStreaming }) {
   const isUser = message.role === 'user';
   const [copiedMessage, setCopiedMessage] = useState(false);
   const { tx } = useI18n();
@@ -364,3 +364,10 @@ function buildMessageCopyText(message, tx) {
 
   return parts.join('\n\n').trim();
 }
+
+function areMessageBubblePropsEqual(prevProps, nextProps) {
+  return prevProps.isStreaming === nextProps.isStreaming
+    && prevProps.message === nextProps.message;
+}
+
+export default memo(MessageBubble, areMessageBubblePropsEqual);

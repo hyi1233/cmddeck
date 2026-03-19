@@ -438,7 +438,7 @@ function buildUnifiedProviderHistory(appSessions, providerHistory, provider, act
       count: messageCount || (historySession?.promptCount || 0),
       countLabel: messageCount > 0
         ? tx('messages', '条消息')
-        : (historySession?.promptCount ? tx('prompts', '条提示') : tx('messages', '条消息')),
+        : (historySession?.promptCount ? tx('turns', '轮次') : tx('messages', '条消息')),
       hasUnread: Boolean(session.hasUnread),
       isActive: session.id === activeSessionId,
       canDelete: true,
@@ -465,7 +465,7 @@ function buildUnifiedProviderHistory(appSessions, providerHistory, provider, act
       timestamp: historySession.lastTimestamp || historySession.firstTimestamp || 0,
       project: historySession.project || '',
       count: historySession.promptCount || 0,
-      countLabel: tx('prompts', '条提示'),
+      countLabel: tx('turns', '轮次'),
       hasUnread: false,
       isActive: false,
       canDelete: false,

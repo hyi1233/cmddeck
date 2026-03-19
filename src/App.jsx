@@ -1025,6 +1025,7 @@ export default function App() {
             )}
 
             <ChatView
+              sessionKey={activeSession?.id || ''}
               messages={activeSession?.messages || []}
               streamingText={streamingText}
               streamingToolCalls={streamingToolCalls}

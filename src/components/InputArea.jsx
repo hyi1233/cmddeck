@@ -595,7 +595,7 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
               {effortLabel}
             </span>
           )}
-          {contextUsage && (
+          {contextUsage && currentProvider !== 'codex' && (
             <span className={
               contextUsage.percent > 80 ? 'text-red-500' :
               contextUsage.percent >= 50 ? 'text-yellow-500' :

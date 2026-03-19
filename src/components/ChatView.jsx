@@ -1,10 +1,31 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, memo } from 'react';
 import MessageBubble from './MessageBubble';
 import ToolCallBlock from './ToolCallBlock';
 import { Sparkles, Brain, Loader } from 'lucide-react';
 import { useI18n } from '../i18n';
 
+const INITIAL_VISIBLE_MESSAGES = 30;
+const LOAD_MORE_STEP = 30;
+
+const ChatMessageRow = memo(function ChatMessageRow({ message }) {
+  return (
+    <div>
+      {(message.role !== 'assistant' || Boolean(String(message.content || '').trim()) || (message.attachments?.length || 0) > 0) && (
+        <MessageBubble message={message} isStreaming={false} />
+      )}
+      {message.role === 'assistant' && message.toolCalls?.length > 0 && (
+        <div className="ml-11 mt-1 space-y-1">
+          {message.toolCalls.map((tool, index) => (
+            <ToolCallBlock key={tool.id || index} tool={tool} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export default function ChatView({
+  sessionKey = '',
   messages,
   streamingText,
   streamingToolCalls,
@@ -17,7 +38,17 @@ export default function ChatView({
 }) {
   const bottomRef = useRef(null);
   const prevMsgCountRef = useRef(0);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const { tx } = useI18n();
+  const hiddenCount = Math.max(0, messages.length - visibleCount);
+  const startIndex = hiddenCount;
+  const renderedMessages = hiddenCount > 0
+    ? messages.slice(-visibleCount)
+    : messages;
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_MESSAGES);
+  }, [sessionKey]);
 
   // Scroll to bottom: instant on session switch, smooth on new messages
   useEffect(() => {
@@ -29,8 +60,28 @@ export default function ChatView({
 
     bottomRef.current?.scrollIntoView({
       behavior: isSessionSwitch ? 'instant' : 'smooth',
+      block: 'end',
+      inline: 'nearest',
     });
   }, [messages, streamingText, streamingToolCalls, thinkingText]);
+
+  // Codex often mounts progress/loading rows one frame later.
+  // Force one extra bottom align so the "working..." indicator is not clipped.
+  useEffect(() => {
+    if (!isStreaming || (streamingText && !progressInfo)) {
+      return undefined;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({
+        behavior: 'instant',
+        block: 'end',
+        inline: 'nearest',
+      });
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isStreaming, progressInfo, streamingText]);
 
   if (isLoadingHistory && messages.length === 0 && !isStreaming) {
     return (
@@ -88,21 +139,23 @@ export default function ChatView({
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-      {/* Rendered messages */}
-      {messages.map((msg, i) => (
-        <div key={i}>
-          {(msg.role !== 'assistant' || Boolean(String(msg.content || '').trim()) || (msg.attachments?.length || 0) > 0) && (
-            <MessageBubble message={msg} isStreaming={false} />
-          )}
-          {/* Show tool calls that belong to this message */}
-          {msg.role === 'assistant' && msg.toolCalls?.length > 0 && (
-            <div className="ml-11 mt-1 space-y-1">
-              {msg.toolCalls.map((tc, j) => (
-                <ToolCallBlock key={tc.id || j} tool={tc} />
-              ))}
-            </div>
-          )}
+      {hiddenCount > 0 && (
+        <div className="flex justify-center">
+          <button
+            onClick={() => setVisibleCount((count) => Math.min(messages.length, count + LOAD_MORE_STEP))}
+            className="rounded-full border border-claude-border-light bg-claude-surface-light px-3 py-1 text-xs text-claude-muted-light hover:border-claude-orange/40 hover:text-claude-orange dark:border-claude-border-dark dark:bg-claude-surface-dark dark:text-claude-muted-dark"
+          >
+            {tx('Load {count} earlier messages', '加载更早消息 {count} 条', { count: Math.min(LOAD_MORE_STEP, hiddenCount) })}
+          </button>
         </div>
+      )}
+
+      {/* Rendered messages */}
+      {renderedMessages.map((message, index) => (
+        <ChatMessageRow
+          key={startIndex + index}
+          message={message}
+        />
       ))}
 
       {/* Streaming: thinking indicator */}

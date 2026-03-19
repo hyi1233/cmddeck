@@ -17,6 +17,7 @@ const externalCliProcesses = new Map();
 const EXTERNAL_CLI_POLL_MS = 2000;
 let mainWindow;
 const appIconPath = path.join(__dirname, '../assets/icon.png');
+const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -50,19 +51,70 @@ function getHistoryApi(provider = 'claude') {
 }
 
 function readCodexConfig() {
-  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
-  if (!fs.existsSync(configPath)) {
+  if (!fs.existsSync(CODEX_CONFIG_PATH)) {
     return {};
   }
 
   try {
-    const content = fs.readFileSync(configPath, 'utf-8');
+    const content = fs.readFileSync(CODEX_CONFIG_PATH, 'utf-8');
     const model = content.match(/^model\s*=\s*"([^"]+)"/m)?.[1] || null;
     const reasoningEffort = content.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1] || null;
-    return { model, reasoningEffort };
+    const serviceTier = content.match(/^service_tier\s*=\s*"([^"]+)"/m)?.[1] || null;
+    return { model, reasoningEffort, serviceTier };
   } catch {
     return {};
   }
+}
+
+function updateCodexServiceTier(enabled) {
+  const nextLine = enabled ? 'service_tier = "fast"' : null;
+  const content = fs.existsSync(CODEX_CONFIG_PATH)
+    ? fs.readFileSync(CODEX_CONFIG_PATH, 'utf-8')
+    : '';
+  const nextContent = updateTopLevelTomlKey(content, 'service_tier', nextLine);
+
+  fs.mkdirSync(path.dirname(CODEX_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CODEX_CONFIG_PATH, nextContent, 'utf-8');
+
+  return readCodexConfig();
+}
+
+function updateTopLevelTomlKey(content, key, nextLine) {
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content ? content.split(/\r?\n/) : [];
+  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
+  const nextLines = [];
+  let beforeFirstSection = true;
+  let inserted = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isSection = /^\s*\[.*\]\s*$/.test(trimmed);
+
+    if (beforeFirstSection && keyPattern.test(line)) {
+      if (nextLine && !inserted) {
+        nextLines.push(nextLine);
+        inserted = true;
+      }
+      continue;
+    }
+
+    if (beforeFirstSection && isSection) {
+      if (nextLine && !inserted) {
+        nextLines.push(nextLine);
+        inserted = true;
+      }
+      beforeFirstSection = false;
+    }
+
+    nextLines.push(line);
+  }
+
+  if (nextLine && !inserted) {
+    nextLines.push(nextLine);
+  }
+
+  return nextLines.join(eol).replace(/\s+$/, '') + eol;
 }
 
 function escapePowerShell(value) {
@@ -287,6 +339,17 @@ ipcMain.handle('provider:config', async (_event, provider) => {
     return { success: true, config: {} };
   } catch (err) {
     return { success: false, error: err.message, config: {} };
+  }
+});
+
+ipcMain.handle('provider:setCodexFastMode', async (_event, enabled) => {
+  try {
+    return {
+      success: true,
+      config: updateCodexServiceTier(Boolean(enabled)),
+    };
+  } catch (err) {
+    return { success: false, error: err.message, config: readCodexConfig() };
   }
 });
 

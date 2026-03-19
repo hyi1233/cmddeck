@@ -480,7 +480,43 @@ export default function App() {
     const sessionPermissionMode = getSessionPermissionMode(currentSession);
     const sessionContextUsage = sessionId === activeSessionIdRef.current ? contextUsage : null;
 
+    if (currentSession.provider === 'codex') {
+      const fastCommand = parseCodexFastCommand(message);
+      if (fastCommand) {
+        const providerConfigResult = await window.agent?.getProviderConfig('codex');
+        const fastEnabled = providerConfigResult?.success && providerConfigResult?.config?.serviceTier === 'fast';
+
+        if (fastCommand.type === 'status') {
+          appendLocalConversation(setSessions, sessionId, message, `Fast mode is ${fastEnabled ? 'on' : 'off'}.`);
+          return true;
+        }
+
+        if (fastCommand.type === 'invalid') {
+          appendLocalConversation(setSessions, sessionId, message, 'Usage: /fast [on|off|status]');
+          return true;
+        }
+
+        const enableFast = fastCommand.type === 'toggle'
+          ? !fastEnabled
+          : fastCommand.type === 'on';
+        const updateResult = await window.agent?.setCodexFastMode(enableFast);
+
+        appendLocalConversation(
+          setSessions,
+          sessionId,
+          message,
+          updateResult?.success
+            ? `Fast mode set to ${enableFast ? 'on' : 'off'}`
+            : `Error: ${updateResult?.error || 'Failed to update Codex fast mode.'}`
+        );
+        return true;
+      }
+    }
+
     if (message.trim() === '/status') {
+      const providerConfigResult = currentSession.provider === 'codex'
+        ? await window.agent?.getProviderConfig('codex')
+        : null;
       const userMessage = { role: 'user', content: '/status', localOnly: true };
       const statusLines = [
         `**${tx('App', '应用')}**: CmdDeck`,
@@ -488,6 +524,9 @@ export default function App() {
         `**${tx('Model', '模型')}**: ${sessionModel || tx('Default (CLI config)', '默认（CLI 配置）')}`,
         `**${tx('Reasoning Effort', '推理强度')}**: ${currentSession.provider === 'codex'
           ? (sessionReasoningEffort || tx('Default (CLI config)', '默认（CLI 配置）'))
+          : tx('N/A', '不适用')}`,
+        `**${tx('Fast Mode', '快速模式')}**: ${currentSession.provider === 'codex'
+          ? (providerConfigResult?.config?.serviceTier || tx('Off', '关闭'))
           : tx('N/A', '不适用')}`,
         `**${tx('Mode', '模式')}**: ${sessionPermissionMode}`,
         `**${tx('Working Directory', '工作目录')}**: ${currentSession.cwd || settings.cwd || tx('Not set', '未设置')}`,
@@ -1314,6 +1353,46 @@ function getLastAssistantMessage(messages) {
 
   const lastMessage = messages[messages.length - 1];
   return lastMessage?.role === 'assistant' ? lastMessage : null;
+}
+
+function parseCodexFastCommand(message) {
+  const trimmed = String(message || '').trim();
+  if (!trimmed.toLowerCase().startsWith('/fast')) {
+    return null;
+  }
+
+  const match = trimmed.match(/^\/fast(?:\s+(\S+))?\s*$/i);
+  if (!match) {
+    return { type: 'invalid' };
+  }
+
+  const action = (match[1] || '').toLowerCase();
+  if (!action) {
+    return { type: 'toggle' };
+  }
+  if (action === 'on' || action === 'off' || action === 'status') {
+    return { type: action };
+  }
+  return { type: 'invalid' };
+}
+
+function appendLocalConversation(setSessions, sessionId, userContent, assistantContent) {
+  const userMessage = {
+    role: 'user',
+    content: userContent,
+    localOnly: true,
+  };
+  const assistantMessage = {
+    role: 'assistant',
+    content: assistantContent,
+    localOnly: true,
+  };
+
+  setSessions((prev) => prev.map((session) => (
+    session.id === sessionId
+      ? mergeSessionMessages(session, [...(session.messages || []), userMessage, assistantMessage], { updatedAt: Date.now() })
+      : session
+  )));
 }
 
 function isErrorAssistantMessage(message) {

@@ -101,6 +101,7 @@ function getCodexCommands(tx) {
     { cmd: '/clear', desc: tx('Clear current chat', '清空当前聊天'), icon: Trash2, type: 'local', group: tx('Session', '会话') },
     { cmd: '/quit', desc: tx('Close current chat', '关闭当前聊天'), icon: LogOut, type: 'local', group: tx('Session', '会话') },
     { cmd: '/compact', desc: tx('Compact conversation', '压缩会话上下文'), icon: Minimize2, type: 'cli', group: tx('Session', '会话') },
+    { cmd: '/fast', desc: tx('Switch Codex to faster execution mode', '切换到 Codex 更快的执行模式'), icon: Gauge, type: 'cli', group: tx('Session', '会话') },
     { cmd: '/model', desc: tx('Switch Codex model, then reasoning effort', '切换 Codex 模型，然后选择推理强度'), icon: Cpu, type: 'model', group: tx('Settings', '设置') },
     { cmd: '/effort', desc: tx('Switch Codex reasoning effort', '切换 Codex 推理强度'), icon: Gauge, type: 'effort', group: tx('Settings', '设置') },
     { cmd: '/mode', desc: tx('Switch Codex sandbox mode', '切换 Codex 沙箱模式'), icon: ShieldOff, type: 'mode', group: tx('Settings', '设置') },

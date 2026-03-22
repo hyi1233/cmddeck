@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electron', {
   minimize: () => ipcRenderer.send('window:minimize'),
@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('claude', {
   },
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   selectFiles: () => ipcRenderer.invoke('dialog:selectFiles'),
+  classifyPaths: (paths) => ipcRenderer.invoke('paths:classify', paths),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   getDefaultCwd: () => ipcRenderer.invoke('app:getDefaultCwd'),
   saveClipboardImage: (base64Data, mimeType) =>
     ipcRenderer.invoke('clipboard:saveImage', base64Data, mimeType),

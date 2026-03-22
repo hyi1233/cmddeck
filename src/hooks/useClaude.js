@@ -333,20 +333,6 @@ export function useClaude() {
 
       return new Promise((resolve) => {
         entry.resolve = resolve;
-        // Safety timeout: 5 minutes per session
-        entry.timeoutId = setTimeout(() => {
-          if (entry.resolve === resolve) {
-            entry.resolve = null;
-            resolve({
-              text: turnData.text || 'Response timed out',
-              toolCalls: turnData.toolCalls,
-              ccSessionId: turnData.ccSessionId,
-            });
-            if (activeViewRef.current === sessionId) {
-              setIsStreaming(false);
-            }
-          }
-        }, 300000);
       });
     },
     []

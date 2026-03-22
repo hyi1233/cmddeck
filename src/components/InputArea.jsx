@@ -74,12 +74,30 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
   const [slashFilter, setSlashFilter] = useState('');
   const textareaRef = useRef(null);
   const slashMenuRef = useRef(null);
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
     if (!isStreaming && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [isStreaming, isExpanded]);
+
+  useEffect(() => {
+    const preventWindowDrop = (event) => {
+      if (!hasDroppedFiles(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    window.addEventListener('dragover', preventWindowDrop);
+    window.addEventListener('drop', preventWindowDrop);
+
+    return () => {
+      window.removeEventListener('dragover', preventWindowDrop);
+      window.removeEventListener('drop', preventWindowDrop);
+    };
+  }, []);
 
   const addFiles = async (filePaths) => {
     const newFiles = [];
@@ -105,6 +123,41 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
   const addFileWithPreview = (filePath, dataUrl) => {
     if (!filePath || attachedFiles.some((f) => f.path === filePath)) return;
     setAttachedFiles((prev) => [...prev, { path: filePath, previewUrl: dataUrl }]);
+  };
+
+  const insertTextAtCursor = (value) => {
+    if (!value) {
+      return;
+    }
+
+    setText((prev) => {
+      const element = textareaRef.current;
+      if (!element) {
+        return prev ? `${prev}\n${value}` : value;
+      }
+
+      const start = element.selectionStart ?? prev.length;
+      const end = element.selectionEnd ?? start;
+      const prefix = prev.slice(0, start);
+      const suffix = prev.slice(end);
+      const needsLeadingBreak = prefix && !prefix.endsWith('\n') ? '\n' : '';
+      const needsTrailingBreak = suffix && !value.endsWith('\n') ? '\n' : '';
+
+      return `${prefix}${needsLeadingBreak}${value}${needsTrailingBreak}${suffix}`;
+    });
+
+    window.requestAnimationFrame(() => {
+      const element = textareaRef.current;
+      if (!element) {
+        return;
+      }
+
+      element.focus();
+      element.style.height = 'auto';
+      const clamped = Math.min(element.scrollHeight, 150);
+      element.style.height = `${clamped}px`;
+      element.classList.toggle('has-overflow', element.scrollHeight > 150);
+    });
   };
 
   const handleSend = async () => {
@@ -272,16 +325,87 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
     }
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
     setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    const paths = files.map((f) => f.path).filter(Boolean);
-    if (paths.length > 0) addFiles(paths);
+
+    const droppedEntries = collectDroppedEntries(e.dataTransfer);
+    if (droppedEntries.length === 0) {
+      return;
+    }
+
+    const unknownPaths = droppedEntries
+      .filter((entry) => entry.isDirectory === null)
+      .map((entry) => entry.path);
+    let directoryPaths = new Set(
+      droppedEntries
+        .filter((entry) => entry.isDirectory === true)
+        .map((entry) => entry.path)
+    );
+
+    if (unknownPaths.length > 0 && window.claude?.classifyPaths) {
+      const result = await window.claude.classifyPaths(unknownPaths);
+      if (result?.success) {
+        directoryPaths = new Set([
+          ...directoryPaths,
+          ...result.items.filter((item) => item.isDirectory).map((item) => item.path),
+        ]);
+      }
+    }
+
+    const filePaths = [];
+    const folderPaths = [];
+
+    for (const entry of droppedEntries) {
+      if (directoryPaths.has(entry.path)) {
+        folderPaths.push(entry.path);
+      } else {
+        filePaths.push(entry.path);
+      }
+    }
+
+    if (filePaths.length > 0) {
+      await addFiles(filePaths);
+    }
+
+    if (folderPaths.length > 0) {
+      insertTextAtCursor(folderPaths.join('\n'));
+    }
   };
 
-  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+  const handleDragEnter = (e) => {
+    if (!hasDroppedFiles(e.dataTransfer)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  };
+
+  const handleDragOver = (e) => {
+    if (!hasDroppedFiles(e.dataTransfer)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    if (!hasDroppedFiles(e.dataTransfer)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragging(false);
+    }
+  };
 
   const removeFile = (index) => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -360,7 +484,13 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
   // Expanded fullscreen editor
   if (isExpanded) {
     return (
-      <div className="fixed inset-0 z-40 bg-claude-bg-light dark:bg-claude-bg-dark flex flex-col">
+      <div
+        className="fixed inset-0 z-40 bg-claude-bg-light dark:bg-claude-bg-dark flex flex-col"
+        onDragEnter={handleDragEnter}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-claude-border-light dark:border-claude-border-dark bg-claude-surface-light dark:bg-claude-surface-dark">
           <div className="flex items-center gap-3">
@@ -410,6 +540,12 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
 
         {/* Editor */}
         <div className="flex-1 relative">
+          {isDragging && (
+            <div className="absolute inset-4 z-10 rounded-2xl border-2 border-dashed border-claude-orange/50 bg-claude-orange/10 flex items-center justify-center gap-2 text-claude-orange text-sm pointer-events-none">
+              <Paperclip size={16} />
+              {tx('Drop files or folders here', '将文件或文件夹拖到这里')}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={text}
@@ -464,6 +600,7 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
       className={`px-4 py-3 border-t border-claude-border-light dark:border-claude-border-dark bg-claude-bg-light dark:bg-claude-bg-dark transition-colors ${
         isDragging ? 'bg-claude-orange/5 border-claude-orange' : ''
       }`}
+      onDragEnter={handleDragEnter}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -473,7 +610,7 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
       {isDragging && (
         <div className="mb-2 py-4 rounded-xl border-2 border-dashed border-claude-orange/50 bg-claude-orange/5 flex items-center justify-center gap-2 text-claude-orange text-sm">
           <Paperclip size={16} />
-          {tx('Drop files here', '将文件拖到这里')}
+          {tx('Drop files or folders here', '将文件或文件夹拖到这里')}
         </div>
       )}
 
@@ -608,6 +745,59 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
       </div>
     </div>
   );
+}
+
+function hasDroppedFiles(dataTransfer) {
+  return Array.from(dataTransfer?.types || []).includes('Files');
+}
+
+function collectDroppedEntries(dataTransfer) {
+  const entries = [];
+  const seenPaths = new Set();
+  const items = Array.from(dataTransfer?.items || []);
+
+  for (const item of items) {
+    if (item.kind !== 'file') {
+      continue;
+    }
+
+    const file = item.getAsFile?.();
+    const path = file
+      ? window.claude?.getPathForFile?.(file) || ''
+      : '';
+    if (!path || seenPaths.has(path)) {
+      continue;
+    }
+
+    const entry = item.webkitGetAsEntry?.() || null;
+    entries.push({
+      path,
+      isDirectory: entry ? entry.isDirectory === true : null,
+    });
+    seenPaths.add(path);
+  }
+
+  if (entries.length > 0) {
+    return entries;
+  }
+
+  const files = Array.from(dataTransfer?.files || []);
+  for (const file of files) {
+    const path = file
+      ? window.claude?.getPathForFile?.(file) || ''
+      : '';
+    if (!path || seenPaths.has(path)) {
+      continue;
+    }
+
+    entries.push({
+      path,
+      isDirectory: null,
+    });
+    seenPaths.add(path);
+  }
+
+  return entries;
 }
 
 function getEffortLabel(provider, reasoningEffort, tx) {

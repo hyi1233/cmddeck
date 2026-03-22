@@ -47,6 +47,20 @@ export function useAgent() {
   const sessionsRef = useRef(new Map());
   const activeViewRef = useRef(null);
 
+  const finalizeStreaming = (sessionId, entry) => {
+    if (!entry) {
+      return;
+    }
+    if (activeViewRef.current === sessionId) {
+      setIsStreaming(false);
+      setTurnTimer({
+        startTime: entry.turnData.startTime,
+        elapsed: entry.turnData.finalElapsed ?? (Date.now() - entry.turnData.startTime),
+        tokens: entry.turnData.tokens,
+      });
+    }
+  };
+
   const syncStateFromSession = useCallback((sessionId) => {
     const entry = sessionsRef.current.get(sessionId);
     if (entry && entry.resolve) {
@@ -157,6 +171,7 @@ export function useAgent() {
             data.providerSessionId = event.providerSessionId;
           }
           data.finalElapsed = Date.now() - data.startTime;
+          entry.turnDone = true;
           if (event.usage) {
             const inputTokens = event.usage.inputTokens || 0;
             const outputTokens = event.usage.outputTokens || 0;
@@ -181,12 +196,6 @@ export function useAgent() {
             setStreamingToolCalls([...data.toolCalls]);
             setThinkingText('');
             setProgressInfo(null);
-            setIsStreaming(false);
-            setTurnTimer({
-              startTime: data.startTime,
-              elapsed: data.finalElapsed,
-              tokens: data.tokens,
-            });
           }
           if (entry.resolve) {
             entry.resolve({
@@ -199,24 +208,21 @@ export function useAgent() {
           if (entry.timeoutId) {
             clearTimeout(entry.timeoutId);
           }
+          if (entry.processEnded) {
+            finalizeStreaming(event.sessionId, entry);
+          }
           break;
         }
-        case 'process_end':
+        case 'process_end': {
+          entry.processEnded = true;
           if (!data.finalElapsed) {
             data.finalElapsed = Date.now() - data.startTime;
           }
-          {
-            const exitCode = typeof event.exitCode === 'number' ? event.exitCode : null;
-            const stderrText = String(data.stderrText || '').trim();
+          const exitCode = typeof event.exitCode === 'number' ? event.exitCode : null;
+          const stderrText = String(data.stderrText || '').trim();
+
+          if (!entry.turnDone) {
             if (exitCode !== null && exitCode !== 0 && !String(data.text || '').trim() && stderrText) {
-              if (isViewing) {
-                setIsStreaming(false);
-                setTurnTimer({
-                  startTime: data.startTime,
-                  elapsed: data.finalElapsed,
-                  tokens: data.tokens,
-                });
-              }
               if (entry.resolve) {
                 entry.resolve({
                   text: formatErrorText(stderrText),
@@ -229,29 +235,26 @@ export function useAgent() {
               if (entry.timeoutId) {
                 clearTimeout(entry.timeoutId);
               }
+              finalizeStreaming(event.sessionId, entry);
               break;
             }
+
+            if (entry.resolve) {
+              entry.resolve({
+                text: data.text || '',
+                toolCalls: [...data.toolCalls],
+                providerSessionId: data.providerSessionId,
+              });
+              entry.resolve = null;
+            }
           }
-          if (isViewing) {
-            setIsStreaming(false);
-            setTurnTimer({
-              startTime: data.startTime,
-              elapsed: data.finalElapsed,
-              tokens: data.tokens,
-            });
-          }
-          if (entry.resolve) {
-            entry.resolve({
-              text: data.text || '',
-              toolCalls: [...data.toolCalls],
-              providerSessionId: data.providerSessionId,
-            });
-            entry.resolve = null;
-          }
+
           if (entry.timeoutId) {
             clearTimeout(entry.timeoutId);
           }
+          finalizeStreaming(event.sessionId, entry);
           break;
+        }
         case 'error':
           if (!data.finalElapsed) {
             data.finalElapsed = Date.now() - data.startTime;
@@ -331,7 +334,15 @@ export function useAgent() {
       clearTimeout(prev.timeoutId);
     }
 
-    const entry = { requestId, provider, turnData, resolve: null, timeoutId: null };
+    const entry = {
+      requestId,
+      provider,
+      turnData,
+      resolve: null,
+      timeoutId: null,
+      turnDone: false,
+      processEnded: false,
+    };
     sessionsRef.current.set(sessionId, entry);
 
     if (activeViewRef.current === sessionId) {
@@ -363,19 +374,6 @@ export function useAgent() {
 
     return new Promise((resolve) => {
       entry.resolve = resolve;
-      entry.timeoutId = setTimeout(() => {
-        if (entry.resolve === resolve) {
-          entry.resolve = null;
-          resolve({
-            text: turnData.text || 'Response timed out',
-            toolCalls: turnData.toolCalls,
-            providerSessionId: turnData.providerSessionId,
-          });
-          if (activeViewRef.current === sessionId) {
-            setIsStreaming(false);
-          }
-        }
-      }, 300000);
     });
   }, []);
 

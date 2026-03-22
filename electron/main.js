@@ -19,6 +19,12 @@ let mainWindow;
 const appIconPath = path.join(__dirname, '../assets/icon.png');
 const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 
+if (isDev) {
+  const devUserData = path.join(app.getPath('appData'), 'CmdDeck-dev');
+  app.setPath('userData', devUserData);
+  app.setPath('sessionData', path.join(devUserData, 'session'));
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -401,6 +407,31 @@ ipcMain.handle('dialog:selectFiles', async () => {
   });
   if (result.canceled) return [];
   return result.filePaths;
+});
+
+ipcMain.handle('paths:classify', (_event, paths = []) => {
+  try {
+    const items = Array.isArray(paths) ? paths : [];
+    return {
+      success: true,
+      items: items.map((targetPath) => {
+        try {
+          const stats = fs.statSync(targetPath);
+          return {
+            path: targetPath,
+            isDirectory: stats.isDirectory(),
+          };
+        } catch {
+          return {
+            path: targetPath,
+            isDirectory: false,
+          };
+        }
+      }),
+    };
+  } catch (err) {
+    return { success: false, error: err.message, items: [] };
+  }
 });
 
 ipcMain.handle('external:open', async (_event, target) => {

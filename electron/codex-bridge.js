@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const EventEmitter = require('events');
@@ -315,7 +315,7 @@ class CodexBridge extends EventEmitter {
       return false;
     }
 
-    proc.kill('SIGTERM');
+    terminateProcess(proc);
     this.processes.delete(sessionId);
     this.turnStates.delete(sessionId);
     return true;
@@ -323,11 +323,24 @@ class CodexBridge extends EventEmitter {
 
   abortAll() {
     for (const proc of this.processes.values()) {
-      proc.kill('SIGTERM');
+      terminateProcess(proc);
     }
     this.processes.clear();
     this.turnStates.clear();
   }
+}
+
+function terminateProcess(proc) {
+  if (!proc) {
+    return;
+  }
+
+  if (process.platform === 'win32' && proc.pid) {
+    spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+
+  proc.kill('SIGTERM');
 }
 
 function quoteForCmd(arg) {

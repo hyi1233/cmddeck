@@ -11,6 +11,18 @@ function formatErrorText(message) {
   return /^error:/i.test(trimmed) ? trimmed : `Error: ${trimmed}`;
 }
 
+function stopToolCalls(toolCalls) {
+  return (toolCalls || []).map((tool) => (
+    tool.status === 'running'
+      ? {
+          ...tool,
+          status: 'error',
+          result: tool.result || 'Stopped by user.',
+        }
+      : tool
+  ));
+}
+
 export function useClaude() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
@@ -25,6 +37,26 @@ export function useClaude() {
   const sessionsRef = useRef(new Map());
   // Which session the user is currently viewing
   const activeViewRef = useRef(null);
+
+  const finalizeStreaming = (sessionId, entry) => {
+    if (activeViewRef.current === sessionId) {
+      setIsStreaming(false);
+      setTurnTimer({
+        startTime: entry.turnData.startTime,
+        elapsed: entry.turnData.finalElapsed ?? (Date.now() - entry.turnData.startTime),
+        tokens: entry.turnData.tokens,
+      });
+    }
+  };
+
+  const resolveEntry = (entry, payload) => {
+    if (!entry?.resolve) {
+      return;
+    }
+
+    entry.resolve(payload);
+    entry.resolve = null;
+  };
 
   // Sync React state from a session's turnData (or clear if not streaming)
   const syncStateFromSession = useCallback((sessionId) => {
@@ -149,6 +181,7 @@ export function useClaude() {
           data.text = finalText;
           if (event.session_id) data.ccSessionId = event.session_id;
           data.finalElapsed = Date.now() - data.startTime;
+          entry.turnDone = true;
           if (event.usage) {
             const inputTokens = event.usage.input_tokens || 0;
             const outputTokens = event.usage.output_tokens || 0;
@@ -165,69 +198,41 @@ export function useClaude() {
             setStreamingToolCalls([...data.toolCalls]);
             setThinkingText('');
             setProgressInfo(null);
-            setIsStreaming(false);
-            setTurnTimer({
-              startTime: data.startTime,
-              elapsed: data.finalElapsed,
-              tokens: data.tokens,
-            });
           }
-          if (entry.resolve) {
-            entry.resolve({
+          if (entry.processEnded) {
+            resolveEntry(entry, {
               text: finalText,
               toolCalls: [...data.toolCalls],
               ccSessionId: data.ccSessionId,
             });
-            entry.resolve = null;
+            finalizeStreaming(eventSessionId, entry);
           }
-          if (entry.timeoutId) clearTimeout(entry.timeoutId);
           break;
         }
 
         case 'process_end':
+          entry.processEnded = true;
           if (!data.finalElapsed) data.finalElapsed = Date.now() - data.startTime;
           {
             const exitCode = typeof event.exitCode === 'number' ? event.exitCode : null;
             const stderrText = String(data.stderrText || '').trim();
             if (exitCode !== null && exitCode !== 0 && !String(data.text || '').trim() && stderrText) {
-              if (isViewing) {
-                setIsStreaming(false);
-                setTurnTimer({
-                  startTime: data.startTime,
-                  elapsed: data.finalElapsed,
-                  tokens: data.tokens,
-                });
-              }
-              if (entry.resolve) {
-                entry.resolve({
-                  text: formatErrorText(stderrText),
-                  toolCalls: [...data.toolCalls],
-                  ccSessionId: data.ccSessionId,
-                  error: stderrText,
-                });
-                entry.resolve = null;
-              }
-              if (entry.timeoutId) clearTimeout(entry.timeoutId);
+              resolveEntry(entry, {
+                text: formatErrorText(stderrText),
+                toolCalls: [...data.toolCalls],
+                ccSessionId: data.ccSessionId,
+                error: stderrText,
+              });
+              finalizeStreaming(eventSessionId, entry);
               break;
             }
           }
-          if (isViewing) {
-            setIsStreaming(false);
-            setTurnTimer({
-              startTime: data.startTime,
-              elapsed: data.finalElapsed,
-              tokens: data.tokens,
-            });
-          }
-          if (entry.resolve) {
-            entry.resolve({
-              text: data.text || '',
-              toolCalls: [...data.toolCalls],
-              ccSessionId: data.ccSessionId,
-            });
-            entry.resolve = null;
-          }
-          if (entry.timeoutId) clearTimeout(entry.timeoutId);
+          resolveEntry(entry, {
+            text: data.text || '',
+            toolCalls: [...data.toolCalls],
+            ccSessionId: data.ccSessionId,
+          });
+          finalizeStreaming(eventSessionId, entry);
           break;
 
         case 'error':
@@ -243,16 +248,12 @@ export function useClaude() {
                 tokens: data.tokens,
               });
             }
-            if (entry.resolve) {
-              entry.resolve({
-                text: data.text || formattedError,
-                toolCalls: [...data.toolCalls],
-                ccSessionId: data.ccSessionId,
-                error: errorMessage,
-              });
-              entry.resolve = null;
-            }
-            if (entry.timeoutId) clearTimeout(entry.timeoutId);
+            resolveEntry(entry, {
+              text: data.text || formattedError,
+              toolCalls: [...data.toolCalls],
+              ccSessionId: data.ccSessionId,
+              error: errorMessage,
+            });
           }
           break;
 
@@ -301,7 +302,14 @@ export function useClaude() {
       if (prev?.timeoutId) clearTimeout(prev.timeoutId);
 
       // Register in Map before IPC call so events are matched immediately
-      const entry = { requestId, turnData, resolve: null, timeoutId: null };
+      const entry = {
+        requestId,
+        turnData,
+        resolve: null,
+        timeoutId: null,
+        turnDone: false,
+        processEnded: false,
+      };
       sessionsRef.current.set(sessionId, entry);
 
       // Update React state if this is the viewed session
@@ -346,9 +354,11 @@ export function useClaude() {
     if (entry) {
       if (entry.timeoutId) clearTimeout(entry.timeoutId);
       if (entry.resolve) {
+        const toolCalls = stopToolCalls(entry.turnData.toolCalls);
+        entry.turnData.toolCalls = toolCalls;
         entry.resolve({
           text: entry.turnData.text || '[Aborted]',
-          toolCalls: entry.turnData.toolCalls,
+          toolCalls,
           ccSessionId: entry.turnData.ccSessionId,
         });
         entry.resolve = null;

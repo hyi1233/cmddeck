@@ -95,7 +95,8 @@ export function createSession(cwd = '', provider = 'claude', config = {}) {
 
 function normalizeSession(session) {
   const providerSessionId = session.providerSessionId || session.ccSessionId || null;
-  const summary = summarizeMessages(session.messages || []);
+  const messages = providerSessionId ? [] : normalizeMessages(session.messages || []);
+  const summary = summarizeMessages(messages);
 
   return {
     ...session,
@@ -105,7 +106,7 @@ function normalizeSession(session) {
     permissionMode: typeof session.permissionMode === 'string' ? session.permissionMode : 'default',
     providerSessionId,
     providerSessionCwd: session.providerSessionCwd || session.cwd || '',
-    messages: providerSessionId ? [] : (Array.isArray(session.messages) ? session.messages : []),
+    messages,
     messageCount: typeof session.messageCount === 'number' ? session.messageCount : summary.messageCount,
     lastMessagePreview: typeof session.lastMessagePreview === 'string' ? session.lastMessagePreview : summary.lastMessagePreview,
     hasAttachments: typeof session.hasAttachments === 'boolean' ? session.hasAttachments : summary.hasAttachments,
@@ -151,4 +152,26 @@ function getAutoRunCount(value) {
   }
 
   return Math.max(0, Math.min(parsed, 99));
+}
+
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages.map((message) => ({
+    ...message,
+    toolCalls: normalizeToolCalls(message.toolCalls || []),
+  }));
+}
+
+function normalizeToolCalls(toolCalls) {
+  if (!Array.isArray(toolCalls)) {
+    return [];
+  }
+
+  return toolCalls.map((tool) => ({
+    ...tool,
+    status: tool.status === 'running' ? 'error' : (tool.status || 'completed'),
+  }));
 }

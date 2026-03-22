@@ -1135,7 +1135,7 @@ function normalizeHistoryMessages(messages) {
           name: tool.name,
           input: tool.input,
           result: tool.result,
-          status: tool.status || 'completed',
+          status: tool.status === 'running' ? 'error' : (tool.status || 'completed'),
         }))
       : undefined,
   }));

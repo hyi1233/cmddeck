@@ -35,6 +35,18 @@ function upsertToolCall(toolCalls, nextToolCall) {
   };
 }
 
+function stopToolCalls(toolCalls) {
+  return (toolCalls || []).map((tool) => (
+    tool.status === 'running'
+      ? {
+          ...tool,
+          status: 'error',
+          result: tool.result || 'Stopped by user.',
+        }
+      : tool
+  ));
+}
+
 export function useAgent() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
@@ -59,6 +71,15 @@ export function useAgent() {
         tokens: entry.turnData.tokens,
       });
     }
+  };
+
+  const resolveEntry = (entry, payload) => {
+    if (!entry?.resolve) {
+      return;
+    }
+
+    entry.resolve(payload);
+    entry.resolve = null;
   };
 
   const syncStateFromSession = useCallback((sessionId) => {
@@ -197,18 +218,12 @@ export function useAgent() {
             setThinkingText('');
             setProgressInfo(null);
           }
-          if (entry.resolve) {
-            entry.resolve({
+          if (entry.processEnded) {
+            resolveEntry(entry, {
               text: finalText,
               toolCalls: [...data.toolCalls],
               providerSessionId: data.providerSessionId,
             });
-            entry.resolve = null;
-          }
-          if (entry.timeoutId) {
-            clearTimeout(entry.timeoutId);
-          }
-          if (entry.processEnded) {
             finalizeStreaming(event.sessionId, entry);
           }
           break;
@@ -223,34 +238,27 @@ export function useAgent() {
 
           if (!entry.turnDone) {
             if (exitCode !== null && exitCode !== 0 && !String(data.text || '').trim() && stderrText) {
-              if (entry.resolve) {
-                entry.resolve({
-                  text: formatErrorText(stderrText),
-                  toolCalls: [...data.toolCalls],
-                  providerSessionId: data.providerSessionId,
-                  error: stderrText,
-                });
-                entry.resolve = null;
-              }
-              if (entry.timeoutId) {
-                clearTimeout(entry.timeoutId);
-              }
+              resolveEntry(entry, {
+                text: formatErrorText(stderrText),
+                toolCalls: [...data.toolCalls],
+                providerSessionId: data.providerSessionId,
+                error: stderrText,
+              });
               finalizeStreaming(event.sessionId, entry);
               break;
             }
 
-            if (entry.resolve) {
-              entry.resolve({
-                text: data.text || '',
-                toolCalls: [...data.toolCalls],
-                providerSessionId: data.providerSessionId,
-              });
-              entry.resolve = null;
-            }
-          }
-
-          if (entry.timeoutId) {
-            clearTimeout(entry.timeoutId);
+            resolveEntry(entry, {
+              text: data.text || '',
+              toolCalls: [...data.toolCalls],
+              providerSessionId: data.providerSessionId,
+            });
+          } else {
+            resolveEntry(entry, {
+              text: data.text || '',
+              toolCalls: [...data.toolCalls],
+              providerSessionId: data.providerSessionId,
+            });
           }
           finalizeStreaming(event.sessionId, entry);
           break;
@@ -270,18 +278,12 @@ export function useAgent() {
                 tokens: data.tokens,
               });
             }
-            if (entry.resolve) {
-              entry.resolve({
-                text: data.text || formattedError,
-                toolCalls: [...data.toolCalls],
-                providerSessionId: data.providerSessionId,
-                error: errorMessage,
-              });
-              entry.resolve = null;
-            }
-            if (entry.timeoutId) {
-              clearTimeout(entry.timeoutId);
-            }
+            resolveEntry(entry, {
+              text: data.text || formattedError,
+              toolCalls: [...data.toolCalls],
+              providerSessionId: data.providerSessionId,
+              error: errorMessage,
+            });
             break;
           }
         case 'stderr':
@@ -390,9 +392,11 @@ export function useAgent() {
         clearTimeout(entry.timeoutId);
       }
       if (entry.resolve) {
+        const toolCalls = stopToolCalls(entry.turnData.toolCalls);
+        entry.turnData.toolCalls = toolCalls;
         entry.resolve({
           text: entry.turnData.text || '[Aborted]',
-          toolCalls: entry.turnData.toolCalls,
+          toolCalls,
           providerSessionId: entry.turnData.providerSessionId,
         });
         entry.resolve = null;

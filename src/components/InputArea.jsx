@@ -198,13 +198,13 @@ export default function InputArea({ onSend, onAbort, onClear, onDeleteSession, o
   };
 
   const handleSlashSelect = (cmd) => {
-    const shouldContinueToCodexEffort =
-      currentProvider === 'codex' &&
+    const shouldContinueToEffort =
+      (currentProvider === 'codex' || currentProvider === 'claude') &&
       cmd.type === 'model' &&
       cmd.cmd === '/model' &&
       cmd.modelId !== undefined;
 
-    if (shouldContinueToCodexEffort) {
+    if (shouldContinueToEffort) {
       setShowSlashMenu(true);
       setSlashFilter('/effort');
       setText('/effort');
@@ -839,10 +839,6 @@ function parseWorkspaceEntries(dataTransfer) {
 }
 
 function getEffortLabel(provider, reasoningEffort, tx) {
-  if (provider !== 'codex') {
-    return null;
-  }
-
   if (!reasoningEffort) {
     return null;
   }

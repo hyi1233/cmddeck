@@ -13,11 +13,15 @@ class ClaudeBridge extends EventEmitter {
   }
 
   sendMessage(sessionId, message, options = {}) {
-    const { cwd, files, resumeSessionId, requestId, model, permissionMode } = options;
+    const { cwd, files, resumeSessionId, requestId, model, permissionMode, reasoningEffort } = options;
     const args = ['-p', '--output-format', 'stream-json', '--verbose'];
 
     if (model) {
       args.push('--model', model);
+    }
+
+    if (reasoningEffort) {
+      args.push('--effort', reasoningEffort);
     }
 
     if (permissionMode === 'yolo') {

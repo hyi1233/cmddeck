@@ -115,11 +115,15 @@ export default function App() {
   }, [settings.codexModel, settings.model]);
 
   const getSessionReasoningEffort = useCallback((session) => {
-    if (!session || session.provider !== 'codex') {
+    if (!session) {
       return '';
     }
 
-    return session.reasoningEffort || settings.codexReasoningEffort || '';
+    if (session.provider === 'codex') {
+      return session.reasoningEffort || settings.codexReasoningEffort || '';
+    }
+
+    return session.reasoningEffort || '';
   }, [settings.codexReasoningEffort]);
 
   const getSessionPermissionMode = useCallback((session) => {
@@ -142,9 +146,7 @@ export default function App() {
 
     return createSession(cwd, normalizedProvider, {
       model: overrides.model ?? fallbackModel,
-      reasoningEffort: normalizedProvider === 'codex'
-        ? (overrides.reasoningEffort ?? fallbackReasoningEffort)
-        : '',
+      reasoningEffort: overrides.reasoningEffort ?? fallbackReasoningEffort,
       permissionMode: normalizePermissionModeForProvider(
         normalizedProvider,
         overrides.permissionMode ?? fallbackPermissionMode
@@ -488,9 +490,6 @@ export default function App() {
         normalizedUpdates.permissionMode
       );
     }
-    if (activeSession.provider !== 'codex' && Object.prototype.hasOwnProperty.call(normalizedUpdates, 'reasoningEffort')) {
-      normalizedUpdates.reasoningEffort = '';
-    }
 
     updateSession(activeSession.id, normalizedUpdates);
   }, [activeSession, updateSession]);
@@ -726,9 +725,7 @@ export default function App() {
         providerSessionId: currentSession?.providerSessionId || undefined,
         files: files.length > 0 ? files : undefined,
         model: sessionModel || undefined,
-        reasoningEffort: currentSession.provider === 'codex'
-          ? sessionReasoningEffort || undefined
-          : undefined,
+        reasoningEffort: sessionReasoningEffort || undefined,
         permissionMode: sessionPermissionMode || undefined,
       });
 

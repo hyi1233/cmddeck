@@ -23,14 +23,11 @@ import { useI18n } from '../i18n';
 function getClaudeModels(tx) {
   return [
     { id: '', label: tx('Default (CLI config)', '默认（CLI 配置）'), desc: tx('Use the Claude CLI default model', '使用 Claude CLI 默认模型') },
-    // Aliases — always resolve to the latest in that family
-    { id: 'sonnet', label: 'Sonnet', desc: 'claude-sonnet-4-6 · ' + tx('Balanced speed & quality', '速度与质量均衡') },
-    { id: 'opus', label: 'Opus', desc: 'claude-opus-4-6 · ' + tx('Most capable, complex reasoning', '能力最强，适合复杂推理') },
-    { id: 'haiku', label: 'Haiku', desc: 'claude-haiku-4-5 · ' + tx('Fast, lightweight tasks', '快速轻量任务') },
-    // Full model IDs
-    { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: tx('Most capable — complex analysis & reasoning', '能力最强 — 复杂分析与推理') },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', desc: tx('Best balance of capability and cost', '能力与成本最佳均衡') },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: tx('High-volume, simple tasks — fastest & cheapest', '高频简单任务 — 最快最便宜') },
+    { id: 'sonnet', label: 'Sonnet', desc: tx('Claude Sonnet 4.6 - balanced speed and quality', 'Claude Sonnet 4.6 - 速度与质量均衡') },
+    { id: 'opus', label: 'Opus', desc: tx('Claude Opus 4.7 - most capable for complex reasoning', 'Claude Opus 4.7 - 最强能力，适合复杂推理') },
+    { id: 'haiku', label: 'Haiku', desc: tx('Claude Haiku 4.5 - fastest for lightweight tasks', 'Claude Haiku 4.5 - 轻量任务最快') },
+    { id: 'sonnet[1m]', label: tx('Sonnet (1M context)', 'Sonnet（1M 上下文）'), desc: tx('Claude Sonnet 4.6 with 1M context', 'Claude Sonnet 4.6，支持 1M 上下文') },
+    { id: 'opus[1m]', label: tx('Opus (1M context)', 'Opus（1M 上下文）'), desc: tx('Claude Opus 4.7 with 1M context', 'Claude Opus 4.7，支持 1M 上下文') },
   ];
 }
 
@@ -54,6 +51,17 @@ function getCodexEfforts(tx) {
     { id: 'medium', label: tx('Medium', '中'), desc: tx('Balanced speed and depth', '速度与深度均衡'), color: 'text-green-400' },
     { id: 'high', label: tx('High', '高'), desc: tx('More deliberate reasoning', '更充分的推理'), color: 'text-amber-400' },
     { id: 'xhigh', label: 'XHigh', desc: tx('Deepest reasoning supported by many Codex models', '许多 Codex 模型支持的最深推理'), color: 'text-red-400' },
+  ];
+}
+
+function getClaudeEfforts(tx) {
+  return [
+    { id: '', label: tx('Default (CLI config)', '默认（CLI 配置）'), desc: tx('Use the Claude CLI default reasoning effort', '使用 Claude CLI 默认推理强度'), color: 'text-gray-400' },
+    { id: 'low', label: tx('Low', '低'), desc: tx('Fastest response with lighter reasoning', '最快回复，推理较轻'), color: 'text-sky-400' },
+    { id: 'medium', label: tx('Medium', '中'), desc: tx('Balanced speed and reasoning depth', '速度与推理深度均衡'), color: 'text-green-400' },
+    { id: 'high', label: tx('High', '高'), desc: tx('Deeper reasoning for harder tasks', '更深的推理，适合更难任务'), color: 'text-amber-400' },
+    { id: 'xhigh', label: 'XHigh', desc: tx('Very deep reasoning for complex work', '非常深的推理，适合复杂任务'), color: 'text-red-400' },
+    { id: 'max', label: 'Max', desc: tx('Maximum reasoning depth', '最大推理深度'), color: 'text-fuchsia-400' },
   ];
 }
 
@@ -83,7 +91,8 @@ function getClaudeCommands(tx) {
     { cmd: '/clear', desc: tx('Clear current chat', '清空当前聊天'), icon: Trash2, type: 'local', group: tx('Session', '会话') },
     { cmd: '/quit', desc: tx('Close current chat', '关闭当前聊天'), icon: LogOut, type: 'local', group: tx('Session', '会话') },
     { cmd: '/compact', desc: tx('Compact conversation', '压缩会话上下文'), icon: Minimize2, type: 'cli', group: tx('Session', '会话') },
-    { cmd: '/model', desc: tx('Switch model', '切换模型'), icon: Cpu, type: 'model', group: tx('Settings', '设置') },
+    { cmd: '/model', desc: tx('Switch model, then reasoning effort', '切换模型，然后选择推理强度'), icon: Cpu, type: 'model', group: tx('Settings', '设置') },
+    { cmd: '/effort', desc: tx('Switch reasoning effort', '切换推理强度'), icon: Gauge, type: 'effort', group: tx('Settings', '设置') },
     { cmd: '/mode', desc: tx('Switch permission mode', '切换权限模式'), icon: ShieldOff, type: 'mode', group: tx('Settings', '设置') },
     { cmd: '/theme', desc: tx('Toggle theme', '切换主题'), icon: Moon, type: 'local', group: tx('Settings', '设置') },
     { cmd: '/settings', desc: tx('Open settings', '打开设置'), icon: Settings, type: 'local', group: tx('Settings', '设置') },
@@ -152,17 +161,28 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
   }, [currentModel, currentProvider, providerConfig.model, tx]);
 
   const effortOptions = useMemo(() => {
-    if (currentProvider !== 'codex') {
-      return [];
-    }
-
-    const base = getCodexEfforts(tx);
-    const defaultDescription = providerConfig.reasoningEffort
+    const base = currentProvider === 'codex' ? getCodexEfforts(tx) : getClaudeEfforts(tx);
+    const defaultDescription = currentProvider === 'codex' && providerConfig.reasoningEffort
       ? tx('Use the Codex CLI configured reasoning effort ({effort})', '使用 Codex CLI 已配置的推理强度（{effort}）', { effort: providerConfig.reasoningEffort })
       : base[0].desc;
+    const withDefault = [{ ...base[0], desc: defaultDescription }, ...base.slice(1)];
 
-    return [{ ...base[0], desc: defaultDescription }, ...base.slice(1)];
-  }, [currentProvider, providerConfig.reasoningEffort, tx]);
+    if (currentReasoningEffort && !withDefault.some((item) => item.id === currentReasoningEffort)) {
+      return [
+        ...withDefault,
+        { id: currentReasoningEffort, label: currentReasoningEffort, desc: tx('Current custom reasoning effort', '当前自定义推理强度'), color: 'text-fuchsia-400' },
+      ];
+    }
+
+    if (currentProvider === 'codex' && providerConfig.reasoningEffort && !withDefault.some((item) => item.id === providerConfig.reasoningEffort)) {
+      return [
+        ...withDefault,
+        { id: providerConfig.reasoningEffort, label: providerConfig.reasoningEffort, desc: tx('Current CLI config reasoning effort', '当前 CLI 配置推理强度'), color: 'text-fuchsia-400' },
+      ];
+    }
+
+    return withDefault;
+  }, [currentProvider, currentReasoningEffort, providerConfig.reasoningEffort, tx]);
 
   const modeOptions = useMemo(
     () => (currentProvider === 'codex' ? getCodexModes(tx) : getClaudeModes(tx)),
@@ -374,9 +394,7 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
           </button>
         ))}
         <div className={footerClass}>
-          {currentProvider === 'codex'
-            ? tx('Arrow keys navigate. After model selection, the effort picker opens for low/medium/high/xhigh.', '方向键导航。选择模型后，会继续打开推理强度选择器。')
-            : tx('Arrow keys navigate, Enter selects, Esc closes.', '方向键导航，Enter 选择，Esc 关闭。')}
+          {tx('Arrow keys navigate. After model selection, the effort picker opens.', '方向键导航。选择模型后，会继续打开推理强度选择器。')}
         </div>
       </div>
     );
@@ -479,7 +497,7 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
           )}
           <Gauge size={14} className="text-claude-orange" />
           <span className="text-xs font-semibold text-claude-text-light dark:text-claude-text-dark">
-            {tx('Codex Reasoning Effort', 'Codex 推理强度')}
+            {tx('{provider} Reasoning Effort', '{provider} 推理强度', { provider: providerLabel })}
           </span>
         </div>
         {effortOptions.map((item, index) => (
@@ -500,7 +518,11 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
             <span className="text-xs opacity-50">{item.desc}</span>
           </button>
         ))}
-        <div className={footerClass}>{tx('Choose Default, low, medium, high, or xhigh. Codex maps this to `model_reasoning_effort`.', '可选择默认、low、medium、high 或 xhigh。Codex 会将其映射到 `model_reasoning_effort`。')}</div>
+        <div className={footerClass}>
+          {currentProvider === 'codex'
+            ? tx('Choose Default, low, medium, high, or xhigh. Codex maps this to `model_reasoning_effort`.', '可选择默认、low、medium、high 或 xhigh。Codex 会将其映射到 `model_reasoning_effort`。')
+            : tx('Choose Default, low, medium, high, xhigh, or max. Claude maps this to `--effort`.', '可选择默认、low、medium、high、xhigh 或 max。Claude 会将其映射到 `--effort`。')}
+        </div>
       </div>
     );
   }
@@ -561,7 +583,7 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
               )}
               {command.type === 'effort' && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-fuchsia-500/10 text-fuchsia-400 shrink-0">
-                  Codex
+                  {providerLabel}
                 </span>
               )}
               {command.type === 'mode' && (

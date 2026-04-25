@@ -72,6 +72,52 @@ function readCodexConfig() {
   }
 }
 
+function loadCodexModelCatalog() {
+  return new Promise((resolve) => {
+    execFile('codex', ['debug', 'models'], {
+      timeout: 10000,
+      shell: true,
+      maxBuffer: 10 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({
+          success: false,
+          error: stderr.trim() || err.message,
+          models: [],
+        });
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(stdout);
+        const rawModels = Array.isArray(parsed.models) ? parsed.models : [];
+        const models = rawModels
+          .filter((model) => model?.slug && (!model.visibility || model.visibility === 'list'))
+          .sort((left, right) => (left.priority ?? 9999) - (right.priority ?? 9999))
+          .map((model) => ({
+            id: model.slug,
+            label: model.display_name || model.slug,
+            description: model.description || '',
+            defaultReasoningEffort: model.default_reasoning_level || '',
+            supportedReasoningEfforts: Array.isArray(model.supported_reasoning_levels)
+              ? model.supported_reasoning_levels
+                .map((level) => level?.effort)
+                .filter(Boolean)
+              : [],
+          }));
+
+        resolve({ success: true, models });
+      } catch (parseErr) {
+        resolve({
+          success: false,
+          error: parseErr.message,
+          models: [],
+        });
+      }
+    });
+  });
+}
+
 function updateCodexServiceTier(enabled) {
   const nextLine = enabled ? 'service_tier = "fast"' : null;
   const content = fs.existsSync(CODEX_CONFIG_PATH)
@@ -346,6 +392,14 @@ ipcMain.handle('provider:config', async (_event, provider) => {
   } catch (err) {
     return { success: false, error: err.message, config: {} };
   }
+});
+
+ipcMain.handle('provider:models', async (_event, provider) => {
+  if (provider !== 'codex') {
+    return { success: true, models: [] };
+  }
+
+  return loadCodexModelCatalog();
 });
 
 ipcMain.handle('provider:setCodexFastMode', async (_event, enabled) => {

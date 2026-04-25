@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('agent', {
   loadSession: (provider, sessionId) => ipcRenderer.invoke('history:session', provider, sessionId),
   getVersion: (provider) => ipcRenderer.invoke('provider:version', provider),
   getProviderConfig: (provider) => ipcRenderer.invoke('provider:config', provider),
+  getProviderModels: (provider) => ipcRenderer.invoke('provider:models', provider),
   setCodexFastMode: (enabled) => ipcRenderer.invoke('provider:setCodexFastMode', enabled),
   updateProvider: (provider) => ipcRenderer.invoke('provider:update', provider),
   openInCli: (sessionId, provider, cwd, providerSessionId) =>

@@ -34,13 +34,11 @@ function getClaudeModels(tx) {
 function getCodexModels(tx) {
   return [
     { id: '', label: tx('Default (CLI config)', '默认（CLI 配置）'), desc: tx('Use the Codex CLI configured model', '使用 Codex CLI 已配置的模型') },
-    { id: 'gpt-5.4', label: 'GPT-5.4', desc: tx('Current Codex CLI default model family', '当前 Codex CLI 默认模型系列') },
-    { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', desc: tx('Matches many current Codex CLI configs', '兼容许多当前 Codex CLI 配置') },
-    { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', desc: tx('Supports low/medium/high/xhigh effort', '支持 low / medium / high / xhigh 推理强度') },
-    { id: 'gpt-5.1-codex', label: 'GPT-5.1 Codex', desc: tx('General Codex coding model', '通用 Codex 编码模型') },
-    { id: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', desc: tx('Higher reasoning and reliability', '更高的推理能力和稳定性') },
-    { id: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', desc: tx('Faster and cheaper Codex option', '更快、更便宜的 Codex 选项') },
-    { id: 'gpt-5-codex', label: 'GPT-5 Codex', desc: tx('Earlier GPT-5 Codex release', '较早版本的 GPT-5 Codex') },
+    { id: 'gpt-5.5', label: 'GPT-5.5', desc: tx('Frontier model for complex coding, research, and real-world work', '最强模型，适合复杂编码、研究和真实项目') },
+    { id: 'gpt-5.4', label: 'GPT-5.4', desc: tx('Strong model for everyday coding', '日常编码的强力模型') },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', desc: tx('Small, fast, and cost-efficient for simpler coding tasks', '更小更快，适合简单编码任务') },
+    { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', desc: tx('Coding-optimized model', '编码优化模型') },
+    { id: 'gpt-5.2', label: 'GPT-5.2', desc: tx('Optimized for professional work and long-running agents', '适合专业工作和长时间运行任务') },
   ];
 }
 
@@ -52,6 +50,21 @@ function getCodexEfforts(tx) {
     { id: 'high', label: tx('High', '高'), desc: tx('More deliberate reasoning', '更充分的推理'), color: 'text-amber-400' },
     { id: 'xhigh', label: 'XHigh', desc: tx('Deepest reasoning supported by many Codex models', '许多 Codex 模型支持的最深推理'), color: 'text-red-400' },
   ];
+}
+
+function formatCodexModelDescription(model, tx) {
+  const description = model.description || tx('Codex model from CLI catalog', '来自 Codex CLI 目录的模型');
+  const defaultEffort = model.defaultReasoningEffort
+    ? tx('default {effort}', '默认 {effort}', { effort: model.defaultReasoningEffort })
+    : '';
+  const efforts = Array.isArray(model.supportedReasoningEfforts) && model.supportedReasoningEfforts.length > 0
+    ? model.supportedReasoningEfforts.join('/')
+    : '';
+  const effortText = defaultEffort && efforts
+    ? `${defaultEffort}; ${efforts}`
+    : (defaultEffort || efforts);
+
+  return effortText ? `${description} (${effortText})` : description;
 }
 
 function getClaudeEfforts(tx) {
@@ -135,9 +148,12 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
   const [modeIndex, setModeIndex] = useState(0);
   const [effortIndex, setEffortIndex] = useState(0);
   const [providerConfig, setProviderConfig] = useState({});
+  const [providerModels, setProviderModels] = useState([]);
 
   const modelOptions = useMemo(() => {
-    const base = currentProvider === 'codex' ? getCodexModels(tx) : getClaudeModels(tx);
+    const base = currentProvider === 'codex' && providerModels.length > 0
+      ? [getCodexModels(tx)[0], ...providerModels]
+      : (currentProvider === 'codex' ? getCodexModels(tx) : getClaudeModels(tx));
     const defaultDescription = currentProvider === 'codex' && providerConfig.model
       ? tx('Use the Codex CLI configured model ({model})', '使用 Codex CLI 已配置的模型（{model}）', { model: providerConfig.model })
       : base[0].desc;
@@ -158,7 +174,7 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
     }
 
     return withDefault;
-  }, [currentModel, currentProvider, providerConfig.model, tx]);
+  }, [currentModel, currentProvider, providerConfig.model, providerModels, tx]);
 
   const effortOptions = useMemo(() => {
     const base = currentProvider === 'codex' ? getCodexEfforts(tx) : getClaudeEfforts(tx);
@@ -227,6 +243,42 @@ const SlashCommandMenu = forwardRef(function SlashCommandMenu(
       cancelled = true;
     };
   }, [currentProvider]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProviderModels() {
+      if (currentProvider !== 'codex' || !window.agent?.getProviderModels) {
+        setProviderModels([]);
+        return;
+      }
+
+      try {
+        const result = await window.agent.getProviderModels('codex');
+        if (cancelled) {
+          return;
+        }
+
+        const models = result?.success && Array.isArray(result.models)
+          ? result.models.map((model) => ({
+              id: model.id,
+              label: model.label || model.id,
+              desc: formatCodexModelDescription(model, tx),
+            })).filter((model) => model.id)
+          : [];
+        setProviderModels(models);
+      } catch {
+        if (!cancelled) {
+          setProviderModels([]);
+        }
+      }
+    }
+
+    loadProviderModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProvider, tx]);
 
   useEffect(() => {
     if (filter.toLowerCase() === '/model' && filtered.length === 1 && filtered[0].cmd === '/model') {

@@ -173,6 +173,23 @@ function escapePowerShell(value) {
   return `'${String(value ?? '').replace(/'/g, "''")}'`;
 }
 
+function toPowerShellArgumentList(args) {
+  return `@(${args.map(escapePowerShell).join(',')})`;
+}
+
+function quoteWindowsTerminalArg(value) {
+  return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function getWindowsTerminalPath() {
+  const windowsAppsPath = path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WindowsApps', 'wt.exe');
+  if (fs.existsSync(windowsAppsPath)) {
+    return windowsAppsPath;
+  }
+
+  return 'wt.exe';
+}
+
 function buildCliLaunchScript(provider, cwd, providerSessionId) {
   const normalizedProvider = provider === 'codex' ? 'codex' : 'claude';
   const safeCwd = cwd && fs.existsSync(cwd) ? cwd : app.getPath('home');
@@ -188,12 +205,60 @@ function buildCliLaunchScript(provider, cwd, providerSessionId) {
   return {
     cwd: safeCwd,
     command,
+    title,
     script: [
       `$Host.UI.RawUI.WindowTitle = ${escapePowerShell(title)}`,
       `Set-Location -LiteralPath ${escapePowerShell(safeCwd)}`,
       command,
     ].join('; '),
   };
+}
+
+function buildPowerShellTerminalLauncher(launch, encodedScript) {
+  return [
+    `$p = Start-Process -FilePath 'powershell.exe'`,
+    `-WorkingDirectory ${escapePowerShell(launch.cwd)}`,
+    `-ArgumentList ${toPowerShellArgumentList(['-NoExit', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedScript])}`,
+    '-PassThru;',
+    'Write-Output $p.Id',
+  ].join(' ');
+}
+
+function buildWindowsTerminalLauncher(launch, encodedScript, wtPath) {
+  const pidFile = path.join(os.tmpdir(), `cmddeck-cli-${Date.now()}-${Math.random().toString(36).slice(2)}.pid`);
+  const trackedScript = [
+    `Set-Content -LiteralPath ${escapePowerShell(pidFile)} -Value $PID`,
+    launch.script,
+  ].join('; ');
+  const trackedEncodedScript = Buffer.from(trackedScript, 'utf16le').toString('base64');
+  const argumentLine = [
+    'new-tab',
+    '--title',
+    quoteWindowsTerminalArg(launch.title),
+    '-d',
+    quoteWindowsTerminalArg(launch.cwd),
+    'powershell.exe',
+    '-NoExit',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-EncodedCommand',
+    trackedEncodedScript,
+  ].join(' ');
+
+  return [
+    `$p = Start-Process -FilePath ${escapePowerShell(wtPath)}`,
+    `-WorkingDirectory ${escapePowerShell(launch.cwd)}`,
+    `-ArgumentList ${escapePowerShell(argumentLine)}`,
+    '-PassThru;',
+    `$pidPath = ${escapePowerShell(pidFile)};`,
+    'for ($i = 0; $i -lt 50 -and -not (Test-Path -LiteralPath $pidPath); $i++) { Start-Sleep -Milliseconds 100 };',
+    'if (Test-Path -LiteralPath $pidPath) {',
+    '  Get-Content -LiteralPath $pidPath -ErrorAction SilentlyContinue | Select-Object -First 1;',
+    '  Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue;',
+    '} else {',
+    '  Write-Output $p.Id;',
+    '}',
+  ].join(' ');
 }
 
 function notifyCliExit(sessionId, provider, pid, code, signal) {
@@ -252,15 +317,9 @@ async function openCliTerminal(sessionId, provider, cwd, providerSessionId) {
   const normalizedProvider = provider === 'codex' ? 'codex' : 'claude';
   const launch = buildCliLaunchScript(provider, cwd, providerSessionId);
   const encodedScript = Buffer.from(launch.script, 'utf16le').toString('base64');
-  const launcherCommand = [
-    `$p = Start-Process -FilePath 'powershell.exe'`,
-    `-WorkingDirectory ${escapePowerShell(launch.cwd)}`,
-    `-ArgumentList @('-NoExit','-ExecutionPolicy','Bypass','-EncodedCommand','${encodedScript}')`,
-    '-PassThru;',
-    'Write-Output $p.Id',
-  ].join(' ');
+  const wtPath = getWindowsTerminalPath();
 
-  const pid = await new Promise((resolve, reject) => {
+  const runLauncher = (launcherCommand) => new Promise((resolve, reject) => {
     execFile('powershell.exe', [
       '-NoProfile',
       '-ExecutionPolicy',
@@ -283,6 +342,15 @@ async function openCliTerminal(sessionId, provider, cwd, providerSessionId) {
     });
   });
 
+  let pid;
+  let terminal = 'windows-terminal';
+  try {
+    pid = await runLauncher(buildWindowsTerminalLauncher(launch, encodedScript, wtPath));
+  } catch {
+    terminal = 'powershell';
+    pid = await runLauncher(buildPowerShellTerminalLauncher(launch, encodedScript));
+  }
+
   trackExternalCliProcess(sessionId, normalizedProvider, pid);
 
   return {
@@ -291,6 +359,7 @@ async function openCliTerminal(sessionId, provider, cwd, providerSessionId) {
     command: launch.command,
     resumed: Boolean(providerSessionId),
     pid,
+    terminal,
   };
 }
 
